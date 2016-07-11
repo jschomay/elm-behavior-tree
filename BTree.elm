@@ -28,6 +28,9 @@ type NodeState
     | Success
     | Fail
 
+type NewBehavior cmd =
+  Do (NodeId, cmd)
+    | None
 
 type alias NodeName =
     String
@@ -37,23 +40,47 @@ type alias BTreeStates =
     List NodeState
 
 
+type alias NodeId =
+    Int
 
--- tick : BTree cmd -> BTreeStates -> ( NodeState, BTreeStates, List cmd )
+
+tick : BTree cmd -> BTreeStates -> List ( NodeId, NodeState ) -> ( List ( NodeId, cmd ), BTreeStates )
+tick bTree bTreeStates changedStates =
+    let
+
+        traverse : NodeId -> SelectorType -> List (BTree cmd) -> ( List ( NodeId, cmd ), BTreeStates )
+        traverse nodeId selectorType children =
+            -- each layer is responible for setting the state of all of its children and returning any batched commands, gathered children states, and its own state
+            -- it will choose which of its children to run in order to accomplish this before returning (recursively), based on its SelectorType
 
 
-tick node bTreeStates =
-    bTreeStates
+        execute : NodeId -> GoalType -> cmd -> (NewBehavior, NodeState)
+        execute nodeId goalType cmd =
+            -- if state is ready return (Do(id, cmd), Running)
+            -- if changedStates has this id, return (None, newState)
+            -- if state is running return (None, Running)
+
+            (  Do ( nodeId, cmd ) , Running )
+    in
+      case bTree of
+          Selector selectorType children ->
+              traverse 0 selectorType children
+
+          Goal goalType cmd ->
+            -- really shouldn't happen - a tree of just an action
+            ([0,cmd],[Running])
 
 
 initBStates : BTree cmd -> BTreeStates
 initBStates bTree =
-    [ Ready ]
+    -- todo, generate from tree
+    [ Ready, Ready, Ready ]
 
 
 
 -- case children of
 --     [] ->
---         Debug.crash "You must give a selector node chilrdren"
+--         Debug.crash "You must give a selector node children"
 --     x :: xs ->
 --         (tick x) :: List.map tick xs
 -- see https://github.com/skullzzz/behave for simple haskell btree

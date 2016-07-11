@@ -40,7 +40,7 @@ type alias StatusUpdate =
 type alias Character =
     { hunger : Hunger
     , loneliness : Loneliness
-    , currentBehaviors : List Behavior
+    , currentBehaviors : List ( NodeId, Behavior )
     , bTree : BTree Behavior
     , bTreeStates : BTreeStates
     , statusUpdates : List StatusUpdate
@@ -59,7 +59,10 @@ type alias Model =
 
 fredBTree : BTree Behavior
 fredBTree =
-    Goal Action AtHome
+    Selector Priority
+        [ Goal Action AtHome
+        , Goal Action Search
+        ]
 
 
 init : Model
@@ -67,7 +70,7 @@ init =
     { fred =
         { hunger = 0
         , loneliness = 0
-        , currentBehaviors = [ AtHome ]
+        , currentBehaviors = []
         , bTree = fredBTree
         , bTreeStates = BTree.initBStates fredBTree
         , statusUpdates = [ "Hi, I'm Fred!  I'm just chillin' at home today." ]
@@ -94,10 +97,6 @@ update : Msg -> Model -> Model
 update msg model =
     case msg of
         NewDay ->
-            -- update fred's stats
-            -- update fred's status based on actions from his bTree
-            -- update fred's bTreeStates based on actions that complete
-            -- somewhere need to store actions that take multiple days or which day an action expires
             { model
                 | fred = updateCharacter model.fred
                 , days = model.days + 1
@@ -106,6 +105,10 @@ update msg model =
 
 updateCharacter : Character -> Character
 updateCharacter character =
+    -- update fred's currentBehaviors based on actions from bTree
+    -- update fred's properties based on currentBehaviors
+    -- update fred's bTreeStates based on actions that complete
+    -- somewhere need to store actions that take multiple days or which day an action expires
     let
         doBehavior : Behavior -> StatusUpdate
         doBehavior behavior =
@@ -116,13 +119,60 @@ updateCharacter character =
                 other ->
                     "Have not yet implemented: " ++ (toString other)
 
-        addStatusUpdates =
-            List.map doBehavior character.currentBehaviors
+        addStatusUpdates behaviors =
+            List.map (snd >> doBehavior) behaviors
                 ++ character.statusUpdates
+
+        updateHunger =
+            character.hunger + 1
+
+        updateLoneliness =
+            if List.member AtHome (List.map snd character.currentBehaviors) then
+                character.loneliness + 1
+            else
+                0
+
+        updateCurrentBehavior : ( NodeId, Behavior ) -> ( NodeId, NodeState )
+        updateCurrentBehavior ( nodeId, behavior ) =
+            case behavior of
+                AtHome ->
+                    if character.loneliness > 2 then
+                        -- set loneliness to 0 (or do it in updateLoneliness?)
+                        -- remove AtHome from currentBehaviors ???
+                        ( nodeId, Fail )
+                    else
+                        -- add 1 to lonliness here??
+                        ( nodeId, Running )
+
+                _ ->
+                    ( nodeId, Running )
+
+        ( newBehaviors, newBTreeStates ) =
+            List.map updateCurrentBehavior character.currentBehaviors
+                |> BTree.tick character.bTree (Debug.log "btstates" character.bTreeStates)
     in
         { character
-            | statusUpdates = addStatusUpdates
+            | statusUpdates = addStatusUpdates (newBehaviors ++ character.currentBehaviors)
+            , hunger = updateHunger
+            , loneliness = updateLoneliness
+            , bTreeStates = newBTreeStates
+            , currentBehaviors = (Debug.log "nb" newBehaviors) ++ character.currentBehaviors
         }
+
+
+
+{-
+   updateing the state of the tree:
+
+   1. newBehaviors is a List (Behavior, NodeIdentifier)
+   2. the update funciton first checks for any currentBehaviors that need to be upated, either succeed or fail, making a List (NodeIdentifier, Node Status)
+   3. then the update function passes that status update list into BTree.tick
+   4. BTree.tick walks the tree, if it hits the NodeIdentifier node it sets the right status for it and its parent nodes as it finishes walking, returning a fully updated BTreeStates, along with newBehaviors
+   5. the update funciton continues based off of newBehaviors
+
+   still not sure how to remove behaviors from currentBehaviors...
+
+-}
 
 
 main : Program Never
