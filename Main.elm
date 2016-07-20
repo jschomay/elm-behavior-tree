@@ -1,28 +1,16 @@
 module Main exposing (..)
 
-import BTree exposing (..)
+import BT exposing (..)
 import Html exposing (..)
 import Html.Events exposing (..)
 import Html.App as Html
 
 
 type Behavior
-    = AtHome
+    = StayHome
     | Eat
     | Search
     | Play
-
-
-
--- btree : BTree Behavior
--- bTree =
---     Selector Concurrent
---         [ Goal Action SayHi
---         , Selector Sequence
---             [ Goal Condition Wait
---             , Goal Action SayBye
---             ]
---         ]
 
 
 type alias Hunger =
@@ -60,7 +48,7 @@ type alias Model =
 fredBTree : BTree Behavior
 fredBTree =
     Selector Priority
-        [ Goal Action AtHome
+        [ Goal Action StayHome
         , Goal Action Search
         ]
 
@@ -113,7 +101,7 @@ updateCharacter character =
         doBehavior : Behavior -> StatusUpdate
         doBehavior behavior =
             case behavior of
-                AtHome ->
+                StayHome ->
                     "It's good to be home."
 
                 other ->
@@ -127,7 +115,7 @@ updateCharacter character =
             character.hunger + 1
 
         updateLoneliness =
-            if List.member AtHome (List.map snd character.currentBehaviors) then
+            if List.member StayHome (List.map snd character.currentBehaviors) then
                 character.loneliness + 1
             else
                 0
@@ -135,10 +123,10 @@ updateCharacter character =
         updateCurrentBehavior : ( NodeId, Behavior ) -> ( NodeId, NodeState )
         updateCurrentBehavior ( nodeId, behavior ) =
             case behavior of
-                AtHome ->
+                StayHome ->
                     if character.loneliness > 2 then
                         -- set loneliness to 0 (or do it in updateLoneliness?)
-                        -- remove AtHome from currentBehaviors ???
+                        -- remove StayHome from currentBehaviors ???
                         ( nodeId, Fail )
                     else
                         -- add 1 to lonliness here??
