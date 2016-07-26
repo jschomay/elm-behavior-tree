@@ -100,10 +100,6 @@ processActionNode nodeState condition msg model =
             ( Node Ready (Action condition msg), [], Fail )
 
 
-
--- ( Node Running (Action action), [ action model ], Continue )
-
-
 processSelectNode :
     NodeState
     -> List (BT model msg)
@@ -113,7 +109,7 @@ processSelectNode nodeState children model =
     case children of
         [] ->
             -- selects should have children, so no-op
-            ( Node Ready (Select children), [], Continue )
+            ( Node Ready (Select children), [], Succeed )
 
         [ onlyChild ] ->
             case processNode onlyChild model of
@@ -126,87 +122,72 @@ processSelectNode nodeState children model =
                 ( updatedChild, msgs, Fail ) ->
                     ( Node Ready (Select [ updatedChild ]), msgs, Fail )
 
-        firstChild :: remainingChildren ->
-            -- TODO continue filling out correct returns here...
-            ( Node Ready (Select children), [], Continue )
+        _ ->
+            let
+                updateChildren : List (BT model msg) -> model -> ( List (BT model msg), List msg, NodeOutcome )
+                updateChildren children model =
+                    case children of
+                        [] ->
+                            ( [], [], Succeed )
+
+                        [ onlyChild ] ->
+                            let
+                                ( updatedChild, msgs, outcome ) =
+                                    processNode onlyChild model
+                            in
+                                ( [ updatedChild ], msgs, outcome )
+
+                        firstChild :: remainingChildren ->
+                            let
+                                ( updatedFirstChild, firstChildMsgs, firstChildOutcome ) =
+                                    processNode firstChild model
+                            in
+                                case firstChildOutcome of
+                                    Fail ->
+                                        let
+                                            ( updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome ) =
+                                                updateChildren remainingChildren model
+                                        in
+                                            ( updatedFirstChild :: updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome )
+
+                                    _ ->
+                                        ( updatedFirstChild :: remainingChildren, firstChildMsgs, firstChildOutcome )
+
+                updateChildrenFromFirstRunning : List (BT model msg) -> model -> ( List (BT model msg), List msg, NodeOutcome )
+                updateChildrenFromFirstRunning children model =
+                    case children of
+                        ((Node Ready _) as firstChild) :: remainingChildren ->
+                            let
+                                ( updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome ) =
+                                    updateChildrenFromFirstRunning remainingChildren model
+                            in
+                                ( firstChild :: updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome )
+
+                        _ ->
+                            updateChildren children model
+
+                updateNode : ( List (BT model msg), List msg, NodeOutcome ) -> ProcessNodeResult model msg
+                updateNode ( updatedChildren, msgs, outcome ) =
+                    ( Node
+                        (if outcome == Continue then
+                            Running
+                         else
+                            Ready
+                        )
+                        (Select updatedChildren)
+                    , msgs
+                    , outcome
+                    )
+            in
+                case nodeState of
+                    Running ->
+                        updateNode <| updateChildrenFromFirstRunning children model
+
+                    Ready ->
+                        updateNode <| updateChildren children model
 
 
 
-{-
-    updateNode : BT -> (BT, List msg, NodeOutcome)
-      (first defers to nodeType implementation, below is selector type)
-      case no children
-        -> error/noop
-
-      case only one child
-        -> just update the child node
-
-      case update first child (running/running or ready/ready)
-        ->
-          let (updatedChilden, msgs, outcome) =
-                updateChildren children
-          in
-            (Node (setNodeState outcome) Select updatedChilden
-            , msgs
-            , setNodeOutcome outcome
-            )
-
-      case otherwise
-        ->
-          let (updatedChildren, msgs, outcome) =
-                updateChildrenFromFirstRunning children
-          in
-            (Node (setNodeState outcome) Select updatedChildren
-            , msgs
-            , setNodeOutcome outcome
-            )
-
-   updateChildrenFromFirstRunning : List BT -> (List BT, List msg, NodeOutcome)
-      case empty -> error/([], [], Succeed)
-      case one child -> (updateNode child)
-      case head :: tail
-       case head is running -> updateChildren children
-       case otherwise -> (head :: updateChildrenFromFirstRunning tail, msgsFromTail, outcomeFromTail)
-
-    updateChildren : List BT -> (List BT, List msg, NodeOutcome)
-      case empty -> error/([], [], Succeed)
-      case one child -> (updateNode child)
-      case head :: tail ->
-        update head
-          case continue -> (updatedHead :: tail, headMsgs, Continue)
-          case succeed -> (updatedHead :: tail, headMsgs, Succeed)
-          case fail -> (updatedHead :: updateChildren tail, tailMsgs, tailOucome)
-
-
-    # to process a node (of selector type):
-      - update current node children
-        - pick child to update based on node state and node type
-          - update child state and return any msgs and outcome
-          - if node fails
-            - update next child based on outcome and node rules
-      - update node state based on outcome and node rules
-      - return node outcome based on child outcome and rules
-      - return msgs
-
-
-    # combinators:
-
-    combine : (BT, List msg) -> List msg -> (Bt, List msg)
-
-    append : (BT, List msg) -> (List BT, List msg) -> (BT, List msg)
-
-
-    --
-       give action nodes a function that gets applied to the state in the tree reducer/mapper/walker
-
-       action nodes pass back up: updated node, nodeOutcome, behaviorMessage
-
-        remove currentBehaviors, just reduce the tree instead
--}
--- case children of
---     [] ->
---         Debug.crash "You must give a selector node children"
---     x :: xs ->
---         (tick x) :: List.map tick xs
--- see https://github.com/skullzzz/behave for simple haskell btree
--- and http://web.archive.org/web/20140402204854/http://www.altdevblogaday.com/2011/02/24/introduction-to-behavior-trees/
+-- prior art:
+-- http://web.archive.org/web/20140402204854/http://www.altdevblogaday.com/2011/02/24/introduction-to-behavior-trees/
+-- https://github.com/skullzzz/behave for simple haskell bt

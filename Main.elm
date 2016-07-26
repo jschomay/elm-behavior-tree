@@ -1,6 +1,6 @@
 module Main exposing (..)
 
-import BT exposing (..)
+import BT
 import Html exposing (..)
 import Html.Events exposing (..)
 import Html.App as Html
@@ -21,18 +21,39 @@ type alias Loneliness =
     Int
 
 
+type alias DaysOnTheRoad =
+    Int
+
+
 type alias StatusUpdate =
     String
 
 
-type alias Character =
+
+-- type alias Character =
+--     { hunger : Hunger
+--     , loneliness : Loneliness
+--     , daysOnTheRoad : DaysOnTheRoad
+--     , bt : CharacterBT
+--     , statusUpdates : List StatusUpdate
+--     }
+
+
+type Character
+    = Character (BT.BT CharacterData Behavior) CharacterData
+
+
+type alias CharacterData =
     { hunger : Hunger
     , loneliness : Loneliness
-    , currentBehaviors : List ( NodeId, Behavior )
-    , bTree : BTree Behavior
-    , bTreeStates : BTreeStates
+    , daysOnTheRoad : DaysOnTheRoad
     , statusUpdates : List StatusUpdate
     }
+
+
+
+-- type CharacterBT
+--     = CharacterBT BT.BT Character Behavior
 
 
 type alias Day =
@@ -45,36 +66,62 @@ type alias Model =
     }
 
 
-fredBTree : BTree Behavior
-fredBTree =
-    Selector Priority
-        [ Goal Action StayHome
-        , Goal Action Search
-        ]
+fredBT : BT.BT CharacterData Behavior
+fredBT =
+    let
+        lonely : CharacterData -> BT.NodeOutcome
+        lonely { loneliness } =
+            if loneliness < 3 then
+                BT.Continue
+            else
+                BT.Fail
+
+        searching : CharacterData -> BT.NodeOutcome
+        searching { daysOnTheRoad } =
+            if daysOnTheRoad > 3 then
+                BT.Fail
+                -- else if Time.now `Time.andThen` findAFriend
+                -- then BT.Succeed
+            else
+                BT.Continue
+
+        findAFriend seed =
+            False
+
+        -- randomBool seed
+    in
+        BT.select
+            [ BT.action lonely StayHome
+            , BT.action searching Search
+              -- , BT.action (always BT.Continue) Play -- this needs to be under a sequence with Search
+            ]
 
 
 init : Model
 init =
     { fred =
-        { hunger = 0
-        , loneliness = 0
-        , currentBehaviors = []
-        , bTree = fredBTree
-        , bTreeStates = BTree.initBStates fredBTree
-        , statusUpdates = [ "Hi, I'm Fred!  I'm just chillin' at home today." ]
-        }
+        Character fredBT
+            { hunger = 0
+            , loneliness = 0
+            , daysOnTheRoad = 0
+            , statusUpdates = [ "Hi, I'm Fred!  I'm just chillin' at home today." ]
+            }
     , days = 0
     }
 
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ h1 [] [ text "The Life of Fred" ]
-        , h3 [] [ text <| "Day " ++ (toString model.days) ]
-        , button [ onClick NewDay ] [ text "New day" ]
-        , ul [] (List.map (\status -> li [] [ text status ]) model.fred.statusUpdates)
-        ]
+    let
+        (Character _ { statusUpdates }) =
+            model.fred
+    in
+        div []
+            [ h1 [] [ text "The Life of Fred" ]
+            , h3 [] [ text <| "Day " ++ (toString model.days) ]
+            , button [ onClick NewDay ] [ text "New day" ]
+            , ul [] (List.map (\status -> li [] [ text status ]) statusUpdates)
+            ]
 
 
 type Msg
@@ -92,7 +139,7 @@ update msg model =
 
 
 updateCharacter : Character -> Character
-updateCharacter character =
+updateCharacter (Character bt data) =
     -- update fred's currentBehaviors based on actions from bTree
     -- update fred's properties based on currentBehaviors
     -- update fred's bTreeStates based on actions that complete
@@ -107,60 +154,35 @@ updateCharacter character =
                 other ->
                     "Have not yet implemented: " ++ (toString other)
 
-        addStatusUpdates behaviors =
-            List.map (snd >> doBehavior) behaviors
-                ++ character.statusUpdates
+        addStatusUpdates currentBehaviors =
+            List.map doBehavior currentBehaviors
+                ++ data.statusUpdates
 
         updateHunger =
-            character.hunger + 1
+            data.hunger + 1
 
-        updateLoneliness =
-            if List.member StayHome (List.map snd character.currentBehaviors) then
-                character.loneliness + 1
+        updateLoneliness currentBehaviors =
+            if List.member StayHome currentBehaviors then
+                data.loneliness + 1
             else
                 0
 
-        updateCurrentBehavior : ( NodeId, Behavior ) -> ( NodeId, NodeState )
-        updateCurrentBehavior ( nodeId, behavior ) =
-            case behavior of
-                StayHome ->
-                    if character.loneliness > 2 then
-                        -- set loneliness to 0 (or do it in updateLoneliness?)
-                        -- remove StayHome from currentBehaviors ???
-                        ( nodeId, Fail )
-                    else
-                        -- add 1 to lonliness here??
-                        ( nodeId, Running )
+        updateDaysOnTheRoad currentBehaviors =
+            if List.member Search currentBehaviors then
+                data.daysOnTheRoad + 1
+            else
+                0
 
-                _ ->
-                    ( nodeId, Running )
-
-        ( newBehaviors, newBTreeStates ) =
-            List.map updateCurrentBehavior character.currentBehaviors
-                |> BTree.tick character.bTree (Debug.log "btstates" character.bTreeStates)
+        ( updatedBT, currentBehaviors ) =
+            BT.updateTree bt data
     in
-        { character
-            | statusUpdates = addStatusUpdates (newBehaviors ++ character.currentBehaviors)
-            , hunger = updateHunger
-            , loneliness = updateLoneliness
-            , bTreeStates = newBTreeStates
-            , currentBehaviors = (Debug.log "nb" newBehaviors) ++ character.currentBehaviors
-        }
-
-
-
-{-
-   updateing the state of the tree:
-
-   1. newBehaviors is a List (Behavior, NodeIdentifier)
-   2. the update funciton first checks for any currentBehaviors that need to be upated, either succeed or fail, making a List (NodeIdentifier, Node Status)
-   3. then the update function passes that status update list into BTree.tick
-   4. BTree.tick walks the tree, if it hits the NodeIdentifier node it sets the right status for it and its parent nodes as it finishes walking, returning a fully updated BTreeStates, along with newBehaviors
-   5. the update funciton continues based off of newBehaviors
-
-   still not sure how to remove behaviors from currentBehaviors...
-
--}
+        Character updatedBT
+            { data
+                | statusUpdates = addStatusUpdates currentBehaviors
+                , hunger = updateHunger
+                , daysOnTheRoad = updateDaysOnTheRoad currentBehaviors
+                , loneliness = updateLoneliness currentBehaviors
+            }
 
 
 main : Program Never
@@ -171,14 +193,6 @@ main =
 
 -- see https://github.com/skullzzz/behave
 {-
-       Tree can be stateless (Unless you want to change the tree at runtime, which is interesting, like learning new behaviors or setting new priorities, or losing abilities...)
-       The state of each node would be kept in a separate dict, which both the btree and the main update function would reference.
-       - but, what would you use for keys?  The transversal index could work (just an int, or 1.2.1 style) but it seems brittle and makes it impossible to update the tree at runtime.  You could give each node a name, but that wouldn't prevent collisions.
-
-       What is the benefit to not having state in the tree?
-
-       All leaf nodes give commands, even conditionals, which updates their state like normal
-
     ## Example use:
 
     Day by Day
