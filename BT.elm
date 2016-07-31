@@ -1,193 +1,118 @@
-module BT exposing (..)
+module BT
+    exposing
+        ( focus
+        , select
+        , action
+        , tick
+        , behavior
+        , BT
+        , FocusedNode
+        , Outcome(..)
+        )
+
+import MultiwayTree exposing (..)
+import MultiwayTreeZipper exposing (..)
 
 
-type BT model msg
-    = Node NodeState (NodeType model msg)
+-- MODEL
 
 
-type alias NodeList model msg =
-    List (BT model msg)
+type BTNode behavior
+    = Select
+    | Action behavior
 
 
-type NodeType model msg
-    = Select (NodeList model msg)
-    | Sequence (NodeList model msg)
-    | Loop (NodeList model msg)
-    | Concurrent (NodeList model msg)
-    | Action (model -> NodeOutcome) msg
-
-
-type NodeState
-    = Ready
+type Outcome
+    = Success
+    | Failure
     | Running
 
 
-type NodeOutcome
-    = Fail
-    | Succeed
-    | Continue
+type alias BT behavior =
+    Tree (BTNode behavior)
 
 
-type alias ProcessNodeResult model msg =
-    ( BT model msg, List msg, NodeOutcome )
+type alias BTChidren behavior =
+    Forest (BTNode behavior)
 
 
-select : List (BT model msg) -> BT model msg
+select : BTChidren behavior -> BT behavior
 select children =
-    Node Ready (Select children)
+    Tree Select children
 
 
-sequence : List (BT model msg) -> BT model msg
-sequence children =
-    Node Ready (Sequence children)
+action : behavior -> BT behavior
+action behavior =
+    Tree (Action behavior) []
 
 
-concurrent : List (BT model msg) -> BT model msg
-concurrent children =
-    Node Ready (Concurrent children)
+type alias FocusedNode behavior =
+    Zipper (BTNode behavior)
 
 
-loop : List (BT model msg) -> BT model msg
-loop children =
-    Node Ready (Loop children)
+focus : BT behavior -> FocusedNode behavior
+focus tree =
+    ( tree, [] )
 
 
-action : (model -> NodeOutcome) -> msg -> BT model msg
-action condition msg =
-    Node Ready (Action condition msg)
-
-
-updateTree : BT model msg -> model -> ( BT model msg, List msg )
-updateTree bt model =
-    let
-        ( updatedBt, msgs, _ ) =
-            processNode bt model
-    in
-        ( updatedBt, msgs )
-
-
-processNode :
-    BT model msg
-    -> model
-    -> ProcessNodeResult model msg
-processNode node model =
-    case node of
-        Node nodeState (Select children) ->
-            processSelectNode nodeState children model
-
-        Node nodeState (Action condition msg) ->
-            processActionNode nodeState condition msg model
+behavior : FocusedNode behavior -> Maybe behavior
+behavior focusedNode =
+    case MultiwayTreeZipper.datum focusedNode of
+        Action behavior ->
+            Just behavior
 
         _ ->
-            ( node, [], Continue )
+            Nothing
 
 
-processActionNode :
-    NodeState
-    -> (model -> NodeOutcome)
-    -> msg
-    -> model
-    -> ProcessNodeResult model msg
-processActionNode nodeState condition msg model =
-    case condition model of
-        Continue ->
-            ( Node Running (Action condition msg), [ msg ], Continue )
+tick : Outcome -> FocusedNode behavior -> FocusedNode behavior
+tick outcome focusedNode =
+    case goUp focusedNode of
+        Nothing ->
+            -- we are at root
+            firstAction focusedNode
 
-        Succeed ->
-            ( Node Ready (Action condition msg), [ msg ], Succeed )
+        Just parent ->
+            case MultiwayTreeZipper.datum parent of
+                Action _ ->
+                    -- this shouldn't happen, Action's shouldn't have children
+                    parent
 
-        Fail ->
-            ( Node Ready (Action condition msg), [], Fail )
+                Select ->
+                    case outcome of
+                        Running ->
+                            focusedNode
+
+                        Success ->
+                            tick Success parent
+
+                        Failure ->
+                            case goRight focusedNode of
+                                Nothing ->
+                                    tick Failure parent
+
+                                Just nextChild ->
+                                    firstAction nextChild
 
 
-processSelectNode :
-    NodeState
-    -> List (BT model msg)
-    -> model
-    -> ProcessNodeResult model msg
-processSelectNode nodeState children model =
-    case children of
-        [] ->
-            -- selects should have children, so no-op
-            ( Node Ready (Select children), [], Succeed )
+firstAction : FocusedNode behavior -> FocusedNode behavior
+firstAction focusedNode =
+    case MultiwayTreeZipper.datum focusedNode of
+        Action _ ->
+            focusedNode
 
-        [ onlyChild ] ->
-            case processNode onlyChild model of
-                ( updatedChild, msgs, Continue ) ->
-                    ( Node Running (Select [ updatedChild ]), msgs, Continue )
+        Select ->
+            case goToChild 0 focusedNode of
+                Nothing ->
+                    -- shouldn't happen, selects have children
+                    focusedNode
 
-                ( updatedChild, msgs, Succeed ) ->
-                    ( Node Ready (Select [ updatedChild ]), msgs, Succeed )
-
-                ( updatedChild, msgs, Fail ) ->
-                    ( Node Ready (Select [ updatedChild ]), msgs, Fail )
-
-        _ ->
-            let
-                updateChildren : List (BT model msg) -> model -> ( List (BT model msg), List msg, NodeOutcome )
-                updateChildren children model =
-                    case children of
-                        [] ->
-                            ( [], [], Succeed )
-
-                        [ onlyChild ] ->
-                            let
-                                ( updatedChild, msgs, outcome ) =
-                                    processNode onlyChild model
-                            in
-                                ( [ updatedChild ], msgs, outcome )
-
-                        firstChild :: remainingChildren ->
-                            let
-                                ( updatedFirstChild, firstChildMsgs, firstChildOutcome ) =
-                                    processNode firstChild model
-                            in
-                                case firstChildOutcome of
-                                    Fail ->
-                                        let
-                                            ( updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome ) =
-                                                updateChildren remainingChildren model
-                                        in
-                                            ( updatedFirstChild :: updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome )
-
-                                    _ ->
-                                        ( updatedFirstChild :: remainingChildren, firstChildMsgs, firstChildOutcome )
-
-                updateChildrenFromFirstRunning : List (BT model msg) -> model -> ( List (BT model msg), List msg, NodeOutcome )
-                updateChildrenFromFirstRunning children model =
-                    case children of
-                        ((Node Ready _) as firstChild) :: remainingChildren ->
-                            let
-                                ( updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome ) =
-                                    updateChildrenFromFirstRunning remainingChildren model
-                            in
-                                ( firstChild :: updatedRemaingingChildren, remainingChildrenMsgs, remainingChildrenOutcome )
-
-                        _ ->
-                            updateChildren children model
-
-                updateNode : ( List (BT model msg), List msg, NodeOutcome ) -> ProcessNodeResult model msg
-                updateNode ( updatedChildren, msgs, outcome ) =
-                    ( Node
-                        (if outcome == Continue then
-                            Running
-                         else
-                            Ready
-                        )
-                        (Select updatedChildren)
-                    , msgs
-                    , outcome
-                    )
-            in
-                case nodeState of
-                    Running ->
-                        updateNode <| updateChildrenFromFirstRunning children model
-
-                    Ready ->
-                        updateNode <| updateChildren children model
+                Just nextChild ->
+                    firstAction nextChild
 
 
 
 -- prior art:
+-- http://www.gamasutra.com/blogs/ChrisSimpson/20140717/221339/Behavior_trees_for_AI_How_they_work.php
 -- http://web.archive.org/web/20140402204854/http://www.altdevblogaday.com/2011/02/24/introduction-to-behavior-trees/
 -- https://github.com/skullzzz/behave for simple haskell bt
