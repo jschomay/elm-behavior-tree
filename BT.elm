@@ -14,6 +14,11 @@ import MultiwayTree exposing (..)
 import MultiwayTreeZipper exposing (..)
 
 
+(&>) =
+    Maybe.andThen
+
+
+
 -- MODEL
 
 
@@ -75,7 +80,7 @@ tick outcome focusedNode =
         Just parent ->
             case MultiwayTreeZipper.datum parent of
                 Action _ ->
-                    -- this shouldn't happen, Action's shouldn't have children
+                    -- shouldn't happen, Actions shouldn't have children
                     parent
 
                 Select ->
@@ -87,28 +92,22 @@ tick outcome focusedNode =
                             tick Success parent
 
                         Failure ->
-                            case goRight focusedNode of
-                                Nothing ->
-                                    tick Failure parent
+                            Maybe.withDefault (tick Failure parent)
+                                <| nextAction focusedNode
 
-                                Just nextChild ->
-                                    firstAction nextChild
+
+nextAction : FocusedNode behavior -> Maybe (FocusedNode behavior)
+nextAction focusedNode =
+    goRight focusedNode
+        &> (Just << firstAction)
 
 
 firstAction : FocusedNode behavior -> FocusedNode behavior
 firstAction focusedNode =
-    case MultiwayTreeZipper.datum focusedNode of
-        Action _ ->
-            focusedNode
-
-        Select ->
-            case goToChild 0 focusedNode of
-                Nothing ->
-                    -- shouldn't happen, selects have children
-                    focusedNode
-
-                Just nextChild ->
-                    firstAction nextChild
+    -- drop to the first leaf (assumes a valid BT structure)
+    Maybe.withDefault focusedNode
+        <| goToChild 0 focusedNode
+        &> (Just << firstAction)
 
 
 
