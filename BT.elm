@@ -2,6 +2,7 @@ module BT
     exposing
         ( focus
         , select
+        , sequence
         , action
         , tick
         , behavior
@@ -14,16 +15,12 @@ import MultiwayTree exposing (..)
 import MultiwayTreeZipper exposing (..)
 
 
-(&>) =
-    Maybe.andThen
-
-
-
 -- MODEL
 
 
 type BTNode behavior
     = Select
+    | Sequence
     | Action behavior
 
 
@@ -44,6 +41,11 @@ type alias BTChidren behavior =
 select : BTChidren behavior -> BT behavior
 select children =
     Tree Select children
+
+
+sequence : BTChidren behavior -> BT behavior
+sequence children =
+    Tree Sequence children
 
 
 action : behavior -> BT behavior
@@ -94,6 +96,22 @@ tick outcome focusedNode =
                         Failure ->
                             Maybe.withDefault (tick Failure parent)
                                 <| nextAction focusedNode
+
+                Sequence ->
+                    case outcome of
+                        Running ->
+                            focusedNode
+
+                        Success ->
+                            Maybe.withDefault (tick Success parent)
+                                <| nextAction focusedNode
+
+                        Failure ->
+                            tick Failure parent
+
+
+(&>) =
+    Maybe.andThen
 
 
 nextAction : FocusedNode behavior -> Maybe (FocusedNode behavior)

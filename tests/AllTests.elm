@@ -4,12 +4,14 @@ import Test exposing (..)
 import Expect exposing (..)
 import BT exposing (..)
 import SelectNodeTests exposing (selectNodeTests)
+import SequenceNodeTests exposing (sequenceNodeTests)
 
 
 allTests : Test
 allTests =
     describe "BT"
         [ selectNodeTests
+        , sequenceNodeTests
         , general
         ]
 

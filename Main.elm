@@ -4,18 +4,15 @@ import BT
 import Html exposing (..)
 import Html.Events exposing (..)
 import Html.App as Html
+import Random exposing (initialSeed, step, Seed, int)
 
 
 type Behavior
     = NoOp
     | StayHome
-    | Eat
     | Search
-    | Play
-
-
-type alias Hunger =
-    Int
+    | Propose
+    | SettleDown
 
 
 type alias Loneliness =
@@ -31,11 +28,11 @@ type alias StatusUpdate =
 
 
 type alias Character =
-    { hunger : Hunger
-    , loneliness : Loneliness
+    { loneliness : Loneliness
     , daysOnTheRoad : DaysOnTheRoad
     , statusUpdates : List StatusUpdate
     , lastAction : Action
+    , seed : Seed
     }
 
 
@@ -57,19 +54,22 @@ fredBT : BT.BT Behavior
 fredBT =
     BT.select
         [ BT.action StayHome
-        , BT.action Search
-        , BT.action Play
+        , BT.sequence
+            [ BT.action Search
+            , BT.action Propose
+            , BT.action SettleDown
+            ]
         ]
 
 
 init : Model
 init =
     { fred =
-        { hunger = 0
-        , loneliness = 0
+        { loneliness = 0
         , daysOnTheRoad = 0
         , statusUpdates = [ "Hi, I'm Fred!  I'm just chillin' at home today." ]
         , lastAction = ( BT.focus fredBT, BT.Running )
+        , seed = initialSeed 1
         }
     , days = 0
     }
@@ -102,6 +102,9 @@ update msg model =
 updateCharacter : Character -> Character
 updateCharacter character =
     let
+        ( randomInt, newSeed ) =
+            step (int 0 3) character.seed
+
         doBehavior : Behavior -> BT.Outcome
         doBehavior behavior =
             case behavior of
@@ -115,13 +118,23 @@ updateCharacter character =
                         BT.Success
 
                 Search ->
-                    if character.daysOnTheRoad > 2 then
+                    if randomInt == 2 then
+                        BT.Success
+                    else if character.daysOnTheRoad < 2 then
+                        BT.Running
+                    else
+                        BT.Failure
+
+                Propose ->
+                    if snd character.lastAction /= BT.Running then
+                        BT.Running
+                    else if randomInt == 2 then
                         BT.Success
                     else
-                        BT.Running
+                        BT.Failure
 
-                _ ->
-                    BT.Failure
+                SettleDown ->
+                    BT.Running
 
         addStatusUpdate currentBehavior outcome =
             case ( currentBehavior, outcome ) of
@@ -129,22 +142,42 @@ updateCharacter character =
                     "I'm tired of staying home, I'm off to have an adventure!"
 
                 ( StayHome, _ ) ->
-                    if character.loneliness < 2 then
-                        "It's good to be home."
-                    else
-                        "It's getting kind of lonely..."
+                    let
+                        lastBehavior =
+                            ( character.lastAction |> fst >> BT.behavior, character.lastAction |> snd )
+                    in
+                        if lastBehavior == ( Just Propose, BT.Failure ) then
+                            "Oooh the pain of rejection!  I'm going back home."
+                        else if character.loneliness == 0 then
+                            "Home sweet, home."
+                        else if character.loneliness < 2 then
+                            "It's good to be home."
+                        else
+                            "It's getting kind of lonely..."
 
-                ( Search, BT.Success ) ->
-                    "I'm getting tired of all this adventure, time to head back."
-
-                ( Search, _ ) ->
+                ( Search, BT.Running ) ->
                     "Wow, it's such a big would out here..."
 
-                ( other, _ ) ->
-                    "Have not yet implemented: " ++ (toString other)
+                ( Search, BT.Failure ) ->
+                    "I'm getting tired of all this adventure, time to head back."
 
-        updateHunger =
-            character.hunger + 1
+                ( Search, BT.Success ) ->
+                    "Hey, I found a friend!"
+
+                ( Propose, BT.Running ) ->
+                    "Hi, I'm Fred... will you marry me?"
+
+                ( Propose, BT.Success ) ->
+                    "Yes!  You're who I've been looking for my whole life!"
+
+                ( Propose, BT.Failure ) ->
+                    "Eww, no, go away."
+
+                ( SettleDown, _ ) ->
+                    "And they lived happily ever after..."
+
+                ( _, _ ) ->
+                    "Um... what was I doing?"
 
         updateLoneliness currentBehavior =
             if currentBehavior == StayHome then
@@ -174,10 +207,10 @@ updateCharacter character =
     in
         { character
             | statusUpdates = (addStatusUpdate currentBehavior outcome) :: character.statusUpdates
-            , hunger = updateHunger
             , daysOnTheRoad = updateDaysOnTheRoad currentBehavior
             , loneliness = updateLoneliness currentBehavior
             , lastAction = ( newFocus, outcome )
+            , seed = newSeed
         }
 
 
@@ -187,7 +220,6 @@ main =
 
 
 
--- see https://github.com/skullzzz/behave
 {-
     ## Example use:
 
